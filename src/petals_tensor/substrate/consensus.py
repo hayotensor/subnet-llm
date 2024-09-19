@@ -1,8 +1,8 @@
 import threading
 import time
-from petals_tensor.substrate.chain_functions import attest, get_epoch_length, get_min_required_model_consensus_submit_epochs, get_min_required_peer_consensus_submit_epochs, get_model_activated, get_model_data, get_model_path_id, get_rewards_submission, get_rewards_validator, validate
-from petals_tensor.substrate.config import BLOCK_SECS, SubnetDataConfig, SubstrateConfig, load_subnet_config, load_model_validator_config, load_network_config, save_subnet_config
-from petals_tensor.substrate.utils import get_consensus_data, get_eligible_consensus_block, get_next_eligible_submit_consensus_block, get_next_epoch_start_block, get_submittable_nodes, load_last_submit_consensus_block
+from petals_tensor.substrate.chain_functions import attest, get_epoch_length, get_model_activated, get_model_data, get_model_path_id, get_rewards_submission, get_rewards_validator, validate
+from petals_tensor.substrate.config import BLOCK_SECS, SubnetDataConfig, SubstrateConfig, load_subnet_config, load_network_config, save_subnet_config
+from petals_tensor.substrate.utils import get_consensus_data, get_eligible_consensus_block, get_next_epoch_start_block, get_submittable_nodes
 from petals_tensor.validator.inference_validator import InferenceValidator
 from hivemind.utils import get_logger
 
@@ -19,11 +19,11 @@ class Consensus(threading.Thread):
 
   If after, it will begin to validate and or attest epochs
   """
-  def __init__(self, path: str):
+  def __init__(self, path: str, account_id: str):
     super().__init__()
-    self.subnet_id = None
+    self.subnet_id = None # Not required in case of not initialized yet
     self.path = path
-    self.account_id = SubstrateConfig.account_id
+    self.account_id = account_id
     self.subnet_accepting_consensus = False
     self.subnet_node_eligible = False
     # self.subnet_initialized = False
@@ -73,12 +73,12 @@ class Consensus(threading.Thread):
         """
 
         subnet_config = load_subnet_config()
-        model_initialized = subnet_config.initialized
+        subnet_initialized = subnet_config.initialized
         min_required_model_consensus_submit_epochs = network_config.min_required_model_consensus_submit_epochs
 
         subnet_eligible_block = get_eligible_consensus_block(
           self.epoch_length, 
-          model_initialized, 
+          subnet_initialized, 
           min_required_model_consensus_submit_epochs
         )
 
@@ -166,6 +166,7 @@ class Consensus(threading.Thread):
             # If None, still waiting for validator to submit data
             continue
           else:
+            # successful attestation, break and go to next epoch
             break
       except Exception as e:
         logger.error("Consensus Error: %s" % e)
@@ -305,16 +306,16 @@ class Consensus(threading.Thread):
       return False
 
   def should_attest(validator_data, my_data):
-      """Checks if two arrays of dictionaries match, regardless of order."""
+    """Checks if two arrays of dictionaries match, regardless of order."""
 
-      if len(validator_data) != len(my_data):
-          return False
+    if len(validator_data) != len(my_data):
+        return False
 
-      set1 = set(frozenset(d.items()) for d in validator_data)
-      set2 = set(frozenset(d.items()) for d in my_data)
+    set1 = set(frozenset(d.items()) for d in validator_data)
+    set2 = set(frozenset(d.items()) for d in my_data)
 
-      intersection = set1.intersection(set2)
-      logger.info("Matching intersection of %s validator data" % ((len(set1)-intersection)/len(set1)))
-      logger.info("Validator matching intersection of %s my data" % ((len(set2)-intersection)/len(set2)))
+    intersection = set1.intersection(set2)
+    logger.info("Matching intersection of %s validator data" % ((len(set1)-intersection)/len(set1)))
+    logger.info("Validator matching intersection of %s my data" % ((len(set2)-intersection)/len(set2)))
 
-      return set1 == set2
+    return set1 == set2

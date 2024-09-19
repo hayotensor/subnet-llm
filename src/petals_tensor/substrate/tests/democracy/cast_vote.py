@@ -1,12 +1,6 @@
-
-
-
-
-
 from petals_tensor.substrate.chain_functions import cast_vote
 from propose import propose_activate
-from test_utils import PEER_IDS, get_substrate_config
-
+from petals_tensor.substrate.tests.test_utils import PEER_IDS, get_substrate_config
 
 def test_cast_votes(n: int):
   receipt = propose_activate(0)

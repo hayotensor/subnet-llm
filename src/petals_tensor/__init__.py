@@ -16,6 +16,9 @@ from petals_tensor.client import *
 from petals_tensor.models import *
 from petals_tensor.utils import *
 from petals_tensor.health import *
+#?
+from petals_tensor.substrate import *
+#?
 from petals_tensor.utils.logging import initialize_logs as _initialize_logs
 
 __version__ = "2.3.0.dev2"

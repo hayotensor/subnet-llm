@@ -39,6 +39,13 @@ class SubstrateConfig:
   keypair: Keypair = Keypair.create_from_uri(PHRASE)
   account_id: str = Keypair.create_from_uri(PHRASE).ss58_address
 
+class SubstrateConfigCustom:
+  def __init__(self, phrase, url):
+    self.url = url
+    self.interface: SubstrateInterface = SubstrateInterface(url=url)
+    self.keypair = Keypair.create_from_uri(phrase)
+    self.account_id = Keypair.create_from_uri(phrase).ss58_address
+
 class SubnetDataConfig:
   """
   The data fills in when running `python -m petals.cli.run_server`

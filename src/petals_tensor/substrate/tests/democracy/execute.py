@@ -6,8 +6,7 @@
 import time
 from petals_tensor.substrate.chain_functions import cast_vote, execute_proposal, get_subnet_proposal, get_subnet_proposals_count
 from propose import propose_activate
-from test_utils import PEER_IDS, get_substrate_config
-from petals_tensor.substrate.config import BLOCK_SECS
+from petals_tensor.substrate.tests.test_utils import PEER_IDS, get_substrate_config, BLOCK_SECS
 
 # python src/petals_tensor/substrate/tests/democracy/execute.py
 def test_execute_activate():

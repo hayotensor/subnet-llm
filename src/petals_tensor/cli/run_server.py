@@ -6,7 +6,6 @@ run run_update_network_config before run_server
 python -m petals_tensor.cli.run_server petals-team/StableBeluga2 --public_ip [ip] --port [port] --tcp_port [tcp_port]
 python -m petals_tensor.cli.run_server bigscience/bloom-560m --public_ip [ip] --port [port] --tcp_port [tcp_port]
 
-python -m petals_tensor.cli.run_server bigscience/bloom-560m --num_blocks 3
 """
 import os
 import argparse

@@ -1,5 +1,5 @@
 from petals_tensor.substrate.chain_functions import propose
-from test_utils import MODEL_MEMORY_MB, MODEL_PATH, get_subnet_nodes, get_substrate_config
+from petals_tensor.substrate.tests.test_utils import MODEL_MEMORY_MB, MODEL_PATH, get_subnet_nodes_consensus_data, get_substrate_config
 
 
 
@@ -15,8 +15,8 @@ vote_subnet_data = {
 
 def propose_activate(n: int):
   substrate_config = get_substrate_config(n)
-  subnet_nodes = get_subnet_nodes(5)
-  print('subnet nodes: ', subnet_nodes)
+  subnet_nodes_consensus_data = get_subnet_nodes_consensus_data(5)
+  print('subnet get_subnet_nodes_consensus_data: ', subnet_nodes_consensus_data)
 
   print('vote_subnet_data: ', vote_subnet_data)
 
@@ -24,7 +24,7 @@ def propose_activate(n: int):
     substrate_config.interface,
     substrate_config.keypair,
     pre_subnet_data,
-    subnet_nodes,
+    get_subnet_nodes_consensus_data,
     "Activate"
   )
   print('propose receipt: ', receipt)

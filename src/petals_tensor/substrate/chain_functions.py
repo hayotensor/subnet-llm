@@ -1055,7 +1055,6 @@ def get_included(substrate: SubstrateInterface, subnet_id: int):
   return make_query()
 
 def get_submittables(substrate: SubstrateInterface, subnet_id: int):
-  print('get_submittables')
   """
   Get list of all accounts eligible for consensus submissions
 

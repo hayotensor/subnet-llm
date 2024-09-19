@@ -3,9 +3,9 @@ Miscellaneous
 """
 import pickle
 from typing import List, Dict
-from petals_tensor.substrate.chain_data import AccountIdList, ModelPeerData
+from petals_tensor.substrate.chain_data import ModelPeerData
 from petals_tensor.substrate.chain_functions import get_model_peers_included, get_model_peers_submittable, get_submittables
-from petals_tensor.substrate.config import PERCENTAGE_EPOCH_HEALTH_CONSENSUS_RECHECK, load_network_config
+from petals_tensor.substrate.config import PERCENTAGE_EPOCH_HEALTH_CONSENSUS_RECHECK
 from substrateinterface import SubstrateInterface
 from petals_tensor.health.state_updater import StateUpdaterThreadV2
 
@@ -219,26 +219,26 @@ def is_in_consensus_steps(
   """
   return block % epochs_interval == 0 or (block - 1) % epochs_interval == 0
 
-def can_remove_or_update_model_peer(
-  block: int,
-  epochs_interval: int, 
-) -> bool:
-  """
-  Copied from can_remove_or_update_model_peer utils.rs
-  """
-  in_consensus_steps = is_in_consensus_steps(
-    block,
-    epochs_interval, 
-  )
+# def can_remove_or_update_model_peer(
+#   block: int,
+#   epochs_interval: int, 
+# ) -> bool:
+#   """
+#   Copied from can_remove_or_update_model_peer utils.rs
+#   """
+#   in_consensus_steps = is_in_consensus_steps(
+#     block,
+#     epochs_interval, 
+#   )
 
-  network_config = load_network_config()
-  remove_model_peer_epoch_percentage = network_config.remove_model_peer_epoch_percentage
+#   network_config = load_network_config()
+#   remove_model_peer_epoch_percentage = network_config.remove_model_peer_epoch_percentage
 
-  block_span_can_remove_peer = int(epochs_interval * remove_model_peer_epoch_percentage)
+#   block_span_can_remove_peer = int(epochs_interval * remove_model_peer_epoch_percentage)
 
-  start_block = 2 + (block - (block % epochs_interval))
-  end_block = block_span_can_remove_peer + (block - (block % epochs_interval))
-  return start_block <= block and block <= end_block and in_consensus_steps == False
+#   start_block = 2 + (block - (block % epochs_interval))
+#   end_block = block_span_can_remove_peer + (block - (block % epochs_interval))
+#   return start_block <= block and block <= end_block and in_consensus_steps == False
 
 def can_submit_consensus(
   block: int,
@@ -251,7 +251,8 @@ def can_submit_consensus(
     block,
     epochs_interval, 
   )
-  can_remove_or_update_model_peer_ = can_remove_or_update_model_peer(block, epochs_interval)
+  # can_remove_or_update_model_peer_ = can_remove_or_update_model_peer(block, epochs_interval)
+  can_remove_or_update_model_peer_ = True
   return in_consensus_steps == False and can_remove_or_update_model_peer_ == False
 
 # def get_next_eligible_submit_consensus_block(
@@ -267,12 +268,12 @@ def get_next_eligible_submit_consensus_block(
 ) -> int:
   """Returns next eligible block based on last time user submitted"""
 
-  network_config = load_network_config()
-  remove_model_peer_epoch_percentage = network_config.remove_model_peer_epoch_percentage
+  # network_config = load_network_config()
+  # remove_model_peer_epoch_percentage = network_config.remove_model_peer_epoch_percentage
 
-  block_span_can_remove_peer = int(epochs_interval * remove_model_peer_epoch_percentage)
+  # block_span_can_remove_peer = int(epochs_interval * remove_model_peer_epoch_percentage)
 
-  return epochs_interval + (last_block - (last_block % epochs_interval)) + block_span_can_remove_peer
+  return epochs_interval + (last_block - (last_block % epochs_interval))
 
 def get_next_epoch_start_block(
   epochs_length: int, 
@@ -281,16 +282,16 @@ def get_next_epoch_start_block(
   """Returns next start block for next epoch"""
   return epochs_length + (block - (block % epochs_length))
 
-def should_check_model_health_after_consensus(
-  block: int,
-  epochs_interval: int, 
-) -> bool:
-  latter_blocks_span = int(epochs_interval * PERCENTAGE_EPOCH_HEALTH_CONSENSUS_RECHECK)
+# def should_check_model_health_after_consensus(
+#   block: int,
+#   epochs_interval: int, 
+# ) -> bool:
+#   latter_blocks_span = int(epochs_interval * PERCENTAGE_EPOCH_HEALTH_CONSENSUS_RECHECK)
 
-  min_block = block - (block % epochs_interval) + epochs_interval - latter_blocks_span
+#   min_block = block - (block % epochs_interval) + epochs_interval - latter_blocks_span
 
-  max_block = epochs_interval + block - (block % epochs_interval) - 1
-  return start_block <= block and block <= max_block
+#   max_block = epochs_interval + block - (block % epochs_interval) - 1
+#   return start_block <= block and block <= max_block
 
 """Avoid querying the peers the block after submitting consensus, check the latter end of an epoch for model health"""
 def get_recheck_consensus_block(
