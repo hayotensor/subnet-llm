@@ -45,8 +45,9 @@ def get_subnet_nodes_consensus_data(count: int):
   subnet_nodes = []
   for i in range(count):
     node = {
-      'account_id': Keypair.create_from_uri(f"//{i}").ss58_address,
-      'peer_id': PEER_IDS[i]
+      'peer_id': PEER_IDS[i],
+      'score': 10000
     }
     subnet_nodes.append(node)
+    
   return subnet_nodes

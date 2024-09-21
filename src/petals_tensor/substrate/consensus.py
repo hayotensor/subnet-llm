@@ -1,9 +1,10 @@
+from dataclasses import asdict, is_dataclass
 import threading
 import time
-from petals_tensor.substrate.chain_functions import attest, get_epoch_length, get_model_activated, get_model_data, get_model_path_id, get_rewards_submission, get_rewards_validator, validate
-from petals_tensor.substrate.config import BLOCK_SECS, SubnetDataConfig, SubstrateConfig, load_subnet_config, load_network_config, save_subnet_config
+from petals_tensor.substrate.chain_functions import attest, get_epoch_length, get_min_required_model_consensus_submit_epochs, get_model_activated, get_model_data, get_model_path_id, get_rewards_submission, get_rewards_validator, validate
+from petals_tensor.substrate.config import BLOCK_SECS, SubstrateConfig
 from petals_tensor.substrate.utils import get_consensus_data, get_eligible_consensus_block, get_next_epoch_start_block, get_submittable_nodes
-from petals_tensor.validator.inference_validator import InferenceValidator
+# from petals_tensor.validator.inference_validator import InferenceValidator
 from hivemind.utils import get_logger
 
 logger = get_logger(__name__)
@@ -26,10 +27,12 @@ class Consensus(threading.Thread):
     self.account_id = account_id
     self.subnet_accepting_consensus = False
     self.subnet_node_eligible = False
-    # self.subnet_initialized = False
+    self.subnet_initialized = 9223372036854775807 # max int
+    self.last_validated_or_attested_epoch = 0
 
     # blockchain constants
-    self.epoch_length = int(str(get_epoch_length(SubstrateConfig.interface)))
+    self.epoch_length = int(str(get_epoch_length(self.substrate_config.interface)))
+    self.min_required_model_consensus_submit_epochs = get_min_required_model_consensus_submit_epochs(self.substrate_config.interface)
 
     # delete pickles if exist
 
@@ -53,6 +56,12 @@ class Consensus(threading.Thread):
         )
         remaining_blocks_until_next_epoch = next_epoch_start_block - block_number
         
+        # skip if already validated or attested epoch
+        if epoch <= self.last_validated_or_attested_epoch:
+          logger.info("Already completed epoch: %s, waiting for the next " % epoch)
+          time.sleep(remaining_blocks_until_next_epoch * BLOCK_SECS)
+          continue
+
         # Ensure subnet is activated
         if self.subnet_accepting_consensus == False:
           activated = self._activate_subnet()
@@ -66,20 +75,13 @@ class Consensus(threading.Thread):
         # The subnet is activated at this point
         # 1. Check if subnet can accept consensus
         # 2. Check if node is submittable
-        network_config = load_network_config()
-
         """
         Is subnet initialized
         """
-
-        subnet_config = load_subnet_config()
-        subnet_initialized = subnet_config.initialized
-        min_required_model_consensus_submit_epochs = network_config.min_required_model_consensus_submit_epochs
-
         subnet_eligible_block = get_eligible_consensus_block(
           self.epoch_length, 
-          subnet_initialized, 
-          min_required_model_consensus_submit_epochs
+          self.subnet_initialized, 
+          self.min_required_model_consensus_submit_epochs
         )
 
         is_subnet_consensus_eligible = subnet_eligible_block != None and block_number >= subnet_eligible_block
@@ -90,8 +92,6 @@ class Consensus(threading.Thread):
           logger.info("Model begins accepting consensus on block %s, going to sleep for %s blocks " % (subnet_eligible_block, delta))
           time.sleep(delta * BLOCK_SECS)
           continue
-
-
 
         """
         Is subnet node initialized and eligible to submit consensus
@@ -133,6 +133,7 @@ class Consensus(threading.Thread):
           validated = False
           if validated is False:
             self.validate()
+            self.last_validated_or_attested_epoch = epoch
 
           # continue to next epoch, no need to attest
           time.sleep(remaining_blocks_until_next_epoch * BLOCK_SECS)
@@ -167,6 +168,7 @@ class Consensus(threading.Thread):
             continue
           else:
             # successful attestation, break and go to next epoch
+            self.last_validated_or_attested_epoch = epoch
             break
       except Exception as e:
         logger.error("Consensus Error: %s" % e)
@@ -222,21 +224,31 @@ class Consensus(threading.Thread):
       logger.info("Validators data is not valid, skipping attestation.")
     
   def _do_validate(self, data):
-    logger.info("Validating the epoch and submitting rewards data!")
-    receipt = validate(
-      SubstrateConfig.interface,
-      SubstrateConfig.keypair,
-      self.subnet_id,
-      data
-    )
+    print("_do_validate")
+    try:
+      receipt = validate(
+        self.substrate_config.interface,
+        self.substrate_config.keypair,
+        self.subnet_id,
+        data
+      )
+      return receipt
+    except Exception as e:
+      logger.error("Validation Error: %s" % e)
+      return None
 
   def _do_attest(self):
-    logger.info("Attesting the current validators rewards data submission!")
-    receipt = attest(
-      SubstrateConfig.interface,
-      SubstrateConfig.keypair,
-      self.subnet_id,
-    )
+    print("_do_attest")
+    try:
+      receipt = attest(
+        self.substrate_config.interface,
+        self.substrate_config.keypair,
+        self.subnet_id,
+      )
+      return receipt
+    except Exception as e:
+      logger.error("Attestation Error: %s" % e)
+      return None
     
   def _get_consensus_data(self):
     """"""
@@ -285,37 +297,31 @@ class Consensus(threading.Thread):
         subnet_id
       )
 
-      subnet_config = SubnetDataConfig()
-      # Override previous configuration
-      subnet_config.initialize(
-        True,
-        int(str(subnet_id)),
-        self.path,
-        int(str(subnet_data["min_nodes"])),
-        int(str(subnet_data["target_nodes"])),
-        int(str(subnet_data["memory_mb"])),
-        int(str(subnet_data["initialized"]))
-      )
+      self.subnet_initialized = int(str(subnet_data["initialized"]))
 
-      """
-      Save Pickle
-      """
-      save_subnet_config(subnet_config)
       return True
     else:
       return False
 
-  def should_attest(validator_data, my_data):
+  def should_attest(self, validator_data, my_data):
     """Checks if two arrays of dictionaries match, regardless of order."""
 
-    if len(validator_data) != len(my_data):
-        return False
+    if len(validator_data) != len(my_data) and len(validator_data) > 0:
+      return False
 
-    set1 = set(frozenset(d.items()) for d in validator_data)
-    set2 = set(frozenset(d.items()) for d in my_data)
+    # use ``asdict`` because data is decoded from blockchain as dataclass
+    if is_dataclass(validator_data):
+      set1 = set(frozenset(asdict(d).items()) for d in validator_data)
+    else:
+      set1 = set(frozenset(d.items()) for d in validator_data)
+
+    if is_dataclass(my_data):
+      set2 = set(frozenset(asdict(d).items()) for d in my_data)
+    else:
+      set2 = set(frozenset(d.items()) for d in my_data)
 
     intersection = set1.intersection(set2)
-    logger.info("Matching intersection of %s validator data" % ((len(set1)-intersection)/len(set1)))
-    logger.info("Validator matching intersection of %s my data" % ((len(set2)-intersection)/len(set2)))
+    logger.info("Matching intersection of %s validator data" % ((len(intersection))/len(set1) * 100))
+    logger.info("Validator matching intersection of %s my data" % ((len(intersection))/len(set2) * 100))
 
     return set1 == set2

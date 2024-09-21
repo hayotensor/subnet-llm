@@ -1,3 +1,4 @@
+import ast
 from enum import Enum
 import json
 import scalecodec
@@ -27,6 +28,13 @@ custom_rpc_type_registry = {
           ["ip", "Vec<u8>"],
           ["port", "u16"],
           ["initialized", "u64"],
+      ],
+    },
+    "RewardsData": {
+      "type": "struct",
+      "type_mapping": [
+          ["peer_id", "Vec<u8>"],
+          ["score", "u128"],
       ],
     },
   }
@@ -66,6 +74,7 @@ class ChainDataType(Enum):
   Enum for chain data types.
   """
   ModelPeerData = 1
+  RewardsData = 2
 
 def from_scale_encoding(
     input: Union[List[int], bytes, ScaleBytes],
@@ -299,3 +308,110 @@ class AccountIdList:
       decoded_list.append(accountant_data_params)
 
     return decoded_list
+  
+
+@dataclass
+class RewardsData:
+  """
+  Dataclass for model peer metadata.
+  """
+
+  peer_id: str
+  score: int
+
+  @classmethod
+  def fix_decoded_values(cls, rewards_data_decoded: Any) -> "RewardsData":
+    """Fixes the values of the RewardsData object."""
+    rewards_data_decoded["peer_id"] = rewards_data_decoded["peer_id"]
+    rewards_data_decoded["score"] = rewards_data_decoded["score"]
+
+    return cls(**rewards_data_decoded)
+
+  @classmethod
+  def from_vec_u8(cls, vec_u8: List[int]) -> "RewardsData":
+    """Returns a RewardsData object from a ``vec_u8``."""
+
+    if len(vec_u8) == 0:
+      return RewardsData._null_model_peer_data()
+
+    decoded = from_scale_encoding(vec_u8, ChainDataType.RewardsData)
+
+    if decoded is None:
+      return RewardsData._null_model_peer_data()
+
+    decoded = RewardsData.fix_decoded_values(decoded)
+
+    return decoded
+
+  @classmethod
+  def list_from_vec_u8(cls, vec_u8: List[int]) -> List["RewardsData"]:
+    """Returns a list of RewardsData objects from a ``vec_u8``."""
+
+    decoded_list = from_scale_encoding(
+      vec_u8, ChainDataType.RewardsData, is_vec=True
+    )
+    if decoded_list is None:
+      return []
+
+    decoded_list = [
+      RewardsData.fix_decoded_values(decoded) for decoded in decoded_list
+    ]
+    return decoded_list
+
+  @classmethod
+  def list_from_scale_info(cls, scale_info: Any) -> List["RewardsData"]:
+    """Returns a list of RewardsData objects from a ``decoded_list``."""
+    print("list_from_scale_info scale_info", scale_info)
+
+    encoded_list = []
+    for code in map(ord, str(scale_info)):
+      encoded_list.append(code)
+
+    print("list_from_scale_info encoded_list", encoded_list)
+
+
+    decoded = ''.join(map(chr, encoded_list))
+
+    json_data = ast.literal_eval(json.dumps(decoded))
+
+    res = eval(json_data)
+
+    # decoded_list = from_scale_encoding(
+    #   encoded_list, ChainDataType.RewardsData, is_vec=True
+    # )
+
+    # print("list_from_scale_info decoded_list", decoded_list)
+
+    decoded_list = []
+    for item in scale_info:
+      print("list_from_scale_info peer_id", item["peer_id"])
+      print("list_from_scale_info score", item["score"])
+
+      # RewardsData.peer_id = item
+      # data = {
+      #   'peer_id': item["peer_id"],
+      #   'score': item["score"],
+      # }
+      decoded_list.append(
+        RewardsData(
+          peer_id=str(item["peer_id"]),
+          score=int(str(item["score"])),
+        )
+      )
+
+    return decoded_list
+
+  @staticmethod
+  def _rewards_data_to_namespace(rewards_data) -> "RewardsData":
+    """
+    Converts a RewardsData object to a namespace.
+
+    Args:
+      rewards_data (RewardsData): The RewardsData object.
+
+    Returns:
+      RewardsData: The RewardsData object.
+    """
+    neuron = RewardsData(**rewards_data)
+
+    return neuron

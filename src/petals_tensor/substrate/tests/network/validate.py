@@ -1,8 +1,10 @@
 import asyncio
+from dataclasses import asdict, is_dataclass
 import signal
 import time
 import multiprocessing as mp
 from substrateinterface import SubstrateInterface, Keypair
+from petals_tensor.substrate.chain_data import RewardsData
 from petals_tensor.substrate.config import SubstrateConfigCustom
 from petals_tensor.substrate.tests.network.add_subnet_nodes import test_add_subnet_nodes
 from petals_tensor.substrate.tests.test_utils import LOCAL_URL, MODEL_PATH, PEER_IDS, get_subnet_nodes_consensus_data, get_substrate_config, BLOCK_SECS
@@ -20,6 +22,7 @@ from hivemind.utils import get_logger
 
 logger = get_logger(__name__)
 
+PEERS_LENGTH = 5
 # # python src/petals_tensor/substrate/tests/network/validate.py
 
 class TestConsensus(threading.Thread):
@@ -41,6 +44,7 @@ class TestConsensus(threading.Thread):
     self.subnet_accepting_consensus = False
     self.subnet_node_eligible = False
     self.subnet_initialized = 9223372036854775807 # max int
+    self.last_validated_or_attested_epoch = 0
 
     self.substrate_config = SubstrateConfigCustom(phrase, url)
 
@@ -65,8 +69,15 @@ class TestConsensus(threading.Thread):
         epoch = int(block_number / self.epoch_length)
         logger.info("Epoch: %s " % epoch)
 
+        logger.info("Last Validated Epoch: %s " % self.last_validated_or_attested_epoch)
+
+        # skip if already validated or attested epoch
+        if epoch <= self.last_validated_or_attested_epoch:
+          logger.info("Already completed epoch: %s, waiting for the next " % epoch)
+          time.sleep(BLOCK_SECS)
+          continue
+
         next_epoch_start_block = self.epoch_length + (block_number - (block_number % self.epoch_length))
-        remaining_blocks_until_next_epoch = next_epoch_start_block - block_number
         
         # Ensure subnet is activated
         if self.subnet_accepting_consensus == False:
@@ -118,6 +129,7 @@ class TestConsensus(threading.Thread):
           validated = False
           if validated is False:
             self.validate()
+            self.last_validated_or_attested_epoch = epoch
 
           # continue to next epoch, no need to attest
           time.sleep(BLOCK_SECS)
@@ -146,11 +158,13 @@ class TestConsensus(threading.Thread):
             break
 
           result = self.attest(epoch)
+          print("attestation result is: %s" % result)
           if result == None:
             # If None, still waiting for validator to submit data
             continue
           else:
             # successful attestation, break and go to next epoch
+            self.last_validated_or_attested_epoch = epoch
             break
       except Exception as e:
         logger.error("Consensus Error: %s" % e)
@@ -159,16 +173,22 @@ class TestConsensus(threading.Thread):
     print("validate")
     """Get rewards data and submit consensus"""
     consensus_data = self._get_consensus_data()
-    self._do_validate(consensus_data["peers"])
+    self._do_validate(consensus_data)
 
   def attest(self, epoch: int):
     print("attest")
     """Get rewards data from another validator and attest that data if valid"""
     validator_consensus_data = self._get_validator_consensus_data(epoch)
+    print("validator_consensus_data1", validator_consensus_data)
+    print("validator_consensus_data type", type(validator_consensus_data))
+    print("validator_consensus_data[data] type", type(validator_consensus_data["data"]))
 
     if validator_consensus_data == None:
       logger.info("Waiting for validator to submit")
       return None
+
+    validator_consensus_data = RewardsData.list_from_scale_info(validator_consensus_data["data"])
+    print("validator_consensus_data2", validator_consensus_data)
 
     valid = True
 
@@ -177,57 +197,51 @@ class TestConsensus(threading.Thread):
 
     """
     """
-    # For testing
     # Simply validate to ensure mechanism compatibility
 
-    # logger.info("Generating consensus data")
-    # consensus_data = self._get_consensus_data()
-
-    # self.should_attest(validator_consensus_data, consensus_data)
-
-    # if len(validator_consensus_data) != len(consensus_data):
-    #   valid = False
-
-    # for i in range(len(consensus_data)):
-    #   if consensus_data[i] != validator_consensus_data[i]:
-    #       valid = False
-    #       break
-
-    # for data in consensus_data:
-    #   for validator_data in validator_consensus_data:
-    #     """"""
-    #     is_valid = False
-    #     if not is_valid:
-    #       valid = False
-    #       break
+    logger.info("Generating consensus data")
+    consensus_data = self._get_consensus_data()
+    should_attest = self.should_attest(validator_consensus_data, consensus_data)
+    logger.info("Should attest is: %s", should_attest)
 
     if valid:
       logger.info("Validators data is confirmed valid, attesting data...")
-      self._do_attest()
+      return self._do_attest()
     else:
       logger.info("Validators data is not valid, skipping attestation.")
+      return None
     
   def _do_validate(self, data):
     print("_do_validate")
-    receipt = validate(
-      self.substrate_config.interface,
-      self.substrate_config.keypair,
-      self.subnet_id,
-      data
-    )
-
+    try:
+      receipt = validate(
+        self.substrate_config.interface,
+        self.substrate_config.keypair,
+        self.subnet_id,
+        data
+      )
+      return receipt
+    except Exception as e:
+      logger.error("Validation Error: %s" % e)
+      return None
+    
   def _do_attest(self):
     print("_do_attest")
-    receipt = attest(
-      self.substrate_config.interface,
-      self.substrate_config.keypair,
-      self.subnet_id,
-    )
-    
+    try:
+      receipt = attest(
+        self.substrate_config.interface,
+        self.substrate_config.keypair,
+        self.subnet_id,
+      )
+      return receipt
+    except Exception as e:
+      logger.error("Attestation Error: %s" % e)
+      return None
+
   def _get_consensus_data(self):
     print("_get_consensus_data")
     """"""
-    consensus_data = get_subnet_nodes_consensus_data(len(PEER_IDS))
+    consensus_data = get_subnet_nodes_consensus_data(PEERS_LENGTH)
     print("consensus_data", consensus_data)
     return consensus_data
 
@@ -278,25 +292,32 @@ class TestConsensus(threading.Thread):
         subnet_id
       )
 
-      self.subnet_initalized = int(str(subnet_data["initialized"]))
+      self.subnet_initialized = int(str(subnet_data["initialized"]))
 
       return True
     else:
       return False
 
-  def should_attest(validator_data, my_data):
-    print("should_attest")
+  def should_attest(self, validator_data, my_data):
     """Checks if two arrays of dictionaries match, regardless of order."""
 
-    if len(validator_data) != len(my_data):
-        return False
+    if len(validator_data) != len(my_data) or len(validator_data) > 0:
+      return False
 
-    set1 = set(frozenset(d.items()) for d in validator_data)
-    set2 = set(frozenset(d.items()) for d in my_data)
+    # use ``asdict`` because data is decoded from blockchain as dataclass
+    if is_dataclass(validator_data[0]):
+      set1 = set(frozenset(asdict(d).items()) for d in validator_data)
+    else:
+      set1 = set(frozenset(d.items()) for d in validator_data)
+
+    if is_dataclass(my_data[0]):
+      set2 = set(frozenset(asdict(d).items()) for d in my_data)
+    else:
+      set2 = set(frozenset(d.items()) for d in my_data)
 
     intersection = set1.intersection(set2)
-    logger.info("Matching intersection of %s validator data" % ((len(set1)-intersection)/len(set1)))
-    logger.info("Validator matching intersection of %s my data" % ((len(set2)-intersection)/len(set2)))
+    logger.info("Matching intersection of %s validator data" % ((len(intersection))/len(set1) * 100))
+    logger.info("Validator matching intersection of %s my data" % ((len(intersection))/len(set2) * 100))
 
     return set1 == set2
 
@@ -352,4 +373,4 @@ def test_validate(count: int):
 
 if __name__ == "__main__":
   print("Starting test validate")
-  test_validate(5)
+  test_validate(PEERS_LENGTH)
