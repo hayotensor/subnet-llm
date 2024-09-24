@@ -178,7 +178,7 @@ class TestConsensus(threading.Thread):
   def attest(self, epoch: int):
     print("attest")
     """Get rewards data from another validator and attest that data if valid"""
-    validator_consensus_data = self._get_validator_consensus_data(epoch)
+    validator_consensus_data = self._get_validator_consensus_submission(epoch)
     print("validator_consensus_data1", validator_consensus_data)
     print("validator_consensus_data type", type(validator_consensus_data))
     print("validator_consensus_data[data] type", type(validator_consensus_data["data"]))
@@ -245,8 +245,8 @@ class TestConsensus(threading.Thread):
     print("consensus_data", consensus_data)
     return consensus_data
 
-  def _get_validator_consensus_data(self, epoch: int):
-    print("_get_validator_consensus_data")
+  def _get_validator_consensus_submission(self, epoch: int):
+    print("_get_validator_consensus_submission")
     """Get and return the consensus data from the current validator"""
     rewards_submission = get_rewards_submission(
       self.substrate_config.interface,

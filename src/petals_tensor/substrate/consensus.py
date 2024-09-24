@@ -1,6 +1,7 @@
 from dataclasses import asdict, is_dataclass
 import threading
 import time
+from petals_tensor.substrate.chain_data import RewardsData
 from petals_tensor.substrate.chain_functions import attest, get_epoch_length, get_min_required_model_consensus_submit_epochs, get_model_activated, get_model_data, get_model_path_id, get_rewards_submission, get_rewards_validator, validate
 from petals_tensor.substrate.config import BLOCK_SECS, SubstrateConfig
 from petals_tensor.substrate.utils import get_consensus_data, get_eligible_consensus_block, get_next_epoch_start_block, get_submittable_nodes
@@ -31,8 +32,8 @@ class Consensus(threading.Thread):
     self.last_validated_or_attested_epoch = 0
 
     # blockchain constants
-    self.epoch_length = int(str(get_epoch_length(self.substrate_config.interface)))
-    self.min_required_model_consensus_submit_epochs = get_min_required_model_consensus_submit_epochs(self.substrate_config.interface)
+    self.epoch_length = int(str(get_epoch_length(SubstrateConfig.interface)))
+    self.min_required_model_consensus_submit_epochs = get_min_required_model_consensus_submit_epochs(SubstrateConfig.interface)
 
     # delete pickles if exist
 
@@ -180,48 +181,31 @@ class Consensus(threading.Thread):
 
   def attest(self, epoch: int):
     """Get rewards data from another validator and attest that data if valid"""
-    validator_consensus_data = self._get_validator_consensus_data(epoch)
+    validator_consensus_submission = self._get_validator_consensus_submission(epoch)
 
-    if validator_consensus_data == None:
+    if validator_consensus_submission == None:
       logger.info("Waiting for validator to submit")
       return None
 
-    valid = True
-
+    # backup check if validator node restarts in the middle of an epoch to ensure they don't tx again
+    if self._has_attested(validator_consensus_submission["attests"]):
+      logger.info("Has attested already")
+      return None
+    
+    validator_consensus_data = RewardsData.list_from_scale_info(validator_consensus_submission["data"])
+    
     logger.info("Checking if we should attest the validators submission")
+    logger.info("Generating consensus data")
+    consensus_data = self._get_consensus_data()
+    should_attest = self.should_attest(validator_consensus_data, consensus_data)
+    logger.info("Should attest is: %s", should_attest)
 
-
-    """
-    """
-    # For testing
-    # Simply validate to ensure mechanism compatibility
-
-    # logger.info("Generating consensus data")
-    # consensus_data = self._get_consensus_data()
-
-    # self.should_attest(validator_consensus_data, consensus_data)
-
-    # if len(validator_consensus_data) != len(consensus_data):
-    #   valid = False
-
-    # for i in range(len(consensus_data)):
-    #   if consensus_data[i] != validator_consensus_data[i]:
-    #       valid = False
-    #       break
-
-    # for data in consensus_data:
-    #   for validator_data in validator_consensus_data:
-    #     """"""
-    #     is_valid = False
-    #     if not is_valid:
-    #       valid = False
-    #       break
-
-    if valid:
+    if should_attest:
       logger.info("Validators data is confirmed valid, attesting data...")
-      self._do_attest()
+      return self._do_attest()
     else:
       logger.info("Validators data is not valid, skipping attestation.")
+      return None
     
   def _do_validate(self, data):
     print("_do_validate")
@@ -255,7 +239,7 @@ class Consensus(threading.Thread):
     consensus_data = get_consensus_data(SubstrateConfig.interface, self.subnet_id)
     return consensus_data
 
-  def _get_validator_consensus_data(self, epoch: int):
+  def _get_validator_consensus_submission(self, epoch: int):
     """Get and return the consensus data from the current validator"""
     rewards_submission = get_rewards_submission(
       SubstrateConfig.interface,
@@ -263,6 +247,13 @@ class Consensus(threading.Thread):
       epoch
     )
     return rewards_submission
+
+  def _has_attested(self, attested_account_ids) -> bool:
+    """Get and return the consensus data from the current validator"""
+    for account_id in attested_account_ids:
+      if account_id == self.account_id:
+        return True
+    return False
 
   def _get_validator(self, epoch):
     validator = get_rewards_validator(

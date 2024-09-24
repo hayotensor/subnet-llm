@@ -32,6 +32,10 @@ from petals_tensor.server.handler import TransformerConnectionHandler
 from petals_tensor.server.memory_cache import MemoryCache
 from petals_tensor.server.reachability import ReachabilityProtocol, check_direct_reachability, validate_reachability
 from petals_tensor.server.throughput import get_dtype_name, get_server_throughput
+from petals_tensor.substrate.chain_data import ModelPeerData
+from petals_tensor.substrate.chain_functions import get_epoch_length, get_model_path_id, get_model_peers_included
+from petals_tensor.substrate.config import BLOCK_SECS, SubstrateConfig
+from petals_tensor.substrate.utils import get_next_epoch_start_block
 from petals_tensor.utils.auto_config import AutoDistributedConfig
 from petals_tensor.utils.convert_block import QuantType, check_device_balance, convert_block
 from petals_tensor.utils.dht import declare_active_modules, get_remote_module_infos
@@ -270,6 +274,10 @@ class Server:
         self.mean_block_selection_delay = mean_block_selection_delay
 
         self.module_container = None
+
+        # blockchain
+        self.epoch_length = int(str(get_epoch_length(SubstrateConfig.interface)))
+
         self.stop = threading.Event()
 
     def _choose_num_blocks(self) -> int:
@@ -329,6 +337,8 @@ class Server:
         return num_blocks
 
     def run(self):
+        """Run Proof of Stake"""
+        self.proof_of_stake()
         while True:
             block_indices = self._choose_blocks()
             self.module_container = ModuleContainer.create(
@@ -430,31 +440,64 @@ class Server:
         self.dht.shutdown()
         self.dht.join()
 
+    # poc for pos
     def proof_of_stake(self):
         """
         Get POS if subnet is activated
         We check all Inclusion eligible subnet nodes
         """
-        # Idle nodes
-        idle_nodes = []
+        last_validated_epoch = 0
+        while True:
+            block_hash = SubstrateConfig.interface.get_block_hash()
+            block_number = SubstrateConfig.interface.get_block_number(block_hash)
+
+            epoch = int(block_number / self.epoch_length)
+            
+            next_epoch_start_block = get_next_epoch_start_block(
+                self.epoch_length, 
+                block_number
+            )
+            remaining_blocks_until_next_epoch = next_epoch_start_block - block_number
+            
+            # skip if already validated or attested epoch
+            if epoch <= last_validated_epoch:
+                time.sleep(remaining_blocks_until_next_epoch * BLOCK_SECS)
+                break
+
+            subnet_id = get_model_path_id(
+                SubstrateConfig.interface,
+                self.converted_model_name_or_path
+            )
+            if subnet_id is None or subnet_id == 0:
+                # Subnet not activated, waiting for activation to implement proof of stake consensus
+                time.sleep(remaining_blocks_until_next_epoch * BLOCK_SECS)
+                break
         
-        # Get all inclusion subnet nodes
-        inclusion_nodes = []
-        # Validate inclusion subnet nodes with routing table
+            # Get all inclusion nodes that are staked on-chain
+            result = get_model_peers_included(
+                SubstrateConfig.interface,
+                subnet_id,
+            )
+            inclusion_nodes = ModelPeerData.list_from_vec_u8(result["result"])
 
-        for node in inclusion_nodes:
-            peer_id = self.dht._node.protocol.routing_table.get(peer_id=node)
-            if peer_id is None:
-                continue
-        
-            # Validate POS
-            pos = True
+            # iterate each node in routing table and validate stake
+            for routing_table_node in self.dht._node.protocol.routing_table.peer_id_to_uid:
+                for node in routing_table_node.items():
+                    routing_table_peer_id = node[0]
+                    routing_table_node_id = node[1]
 
-            if pos is False:
-                self.dht._node.protocol.routing_table
+                    found = False
+                    for blockchain_node in inclusion_nodes:
+                        if blockchain_node["peer_id"] == routing_table_peer_id:
+                            # found node staked on chain
+                            found = True 
+                            break
+                    if not found:
+                        # node not found on-chain, delete from routing table
+                        self.dht._node.protocol.routing_table.__delitem__(routing_table_node_id)
 
-
-
+            # update last validated epoch
+            last_validated_epoch = epoch
 
 class ModuleContainer(threading.Thread):
     """Serves a set of specific Bloom layers for inference, forward, and backward. Announces itself over the DHT."""
