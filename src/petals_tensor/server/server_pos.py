@@ -440,11 +440,14 @@ class Server:
         self.dht.shutdown()
         self.dht.join()
 
-    # poc for pos
+    # proof of concept for pos (proof of stake)
     def proof_of_stake(self):
         """
         Get POS if subnet is activated
         We check all Inclusion eligible subnet nodes
+
+        • Check each epoch
+        • If node is in routing table but not inclusion, remove from routing table
         """
         last_validated_epoch = 0
         while True:
