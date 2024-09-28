@@ -1,39 +1,43 @@
-import time
-
-import hivemind
+import random
 import pytest
-import torch
 
-from petals_tensor import AutoDistributedConfig, RemoteSequential
-from petals_tensor.server.handler import CACHE_TOKENS_AVAILABLE
-from test_utils import *
+from hivemind.dht.routing import DHTID, RoutingTable
+from hivemind.utils.networking import LOCALHOST
 
+def test_routing_table_basic__delitem__():
+    node_id = DHTID.generate()
+    routing_table = RoutingTable(node_id, bucket_size=20, depth_modulo=5)
+    added_nodes = []
 
-@pytest.mark.forked
-def test_server_info(block_from: int = 2, block_to: int = 5, max_length: int = 100, max_length2: int = 50):
-    config = AutoDistributedConfig.from_pretrained(MODEL_NAME)
-    config.allowed_servers = ["QmNV5G3hq2UmAck2htEgsqrmPFBff5goFZAdmKDcZLBZLX"]  # PeerID from server2.id
+    for phony_neighbor_port in random.sample(range(10000), 100):
+        phony_id = DHTID.generate()
+        routing_table.add_or_update_node(phony_id, f"{LOCALHOST}:{phony_neighbor_port}")
+        assert phony_id in routing_table
+        assert f"{LOCALHOST}:{phony_neighbor_port}" in routing_table
+        assert routing_table[phony_id] == f"{LOCALHOST}:{phony_neighbor_port}"
+        assert routing_table[f"{LOCALHOST}:{phony_neighbor_port}"] == phony_id
+        added_nodes.append(phony_id)
 
-    dht = hivemind.DHT(initial_peers=INITIAL_PEERS, client_mode=True, start=True)
-    blocks1 = RemoteSequential(config, dht=dht, start_block=block_from, end_block=block_to)
-    blocks2 = RemoteSequential(config, dht=dht, start_block=block_to - 1, end_block=block_to)
+    assert routing_table.buckets[0].lower == DHTID.MIN and routing_table.buckets[-1].upper == DHTID.MAX
+    for bucket in routing_table.buckets:
+        assert len(bucket.replacement_nodes) == 0, "There should be no replacement nodes in a table with 100 entries"
+    assert 3 <= len(routing_table.buckets) <= 10, len(routing_table.buckets)
 
-    info_before = blocks1.sequence_manager.rpc_info
+    random_node = random.choice(added_nodes)
+    assert routing_table.get(node_id=random_node) == routing_table[random_node]
+    dummy_node = DHTID.generate()
+    assert (dummy_node not in routing_table) == (routing_table.get(node_id=dummy_node) is None)
 
-    with blocks1.inference_session(max_length=max_length) as sess:
-        sess.step(torch.randn(1, 1, config.hidden_size))
-        blocks1.sequence_manager.state.rpc_info = None  # invalidate cache
-        info_inside = blocks1.sequence_manager.rpc_info
+    for node in added_nodes:
+        found_bucket_index = routing_table.get_bucket_index(node)
+        for bucket_index, bucket in enumerate(routing_table.buckets):
+            if bucket.lower <= node < bucket.upper:
+                break
+        else:
+            raise ValueError("Naive search could not find bucket. Universe has gone crazy.")
+        assert bucket_index == found_bucket_index
 
-        with blocks2.inference_session(max_length=max_length2) as sess2:
-            sess2.step(torch.randn(1, 1, config.hidden_size))
-            blocks2.sequence_manager.state.rpc_info = None  # invalidate cache
-            info_inside2 = blocks2.sequence_manager.rpc_info
-
-    time.sleep(0.1)
-    blocks1.sequence_manager.state.rpc_info = None  # invalidate cache
-    info_after = blocks1.sequence_manager.rpc_info
-
-    assert info_before[CACHE_TOKENS_AVAILABLE] == info_after[CACHE_TOKENS_AVAILABLE]
-    assert info_before[CACHE_TOKENS_AVAILABLE] - info_inside[CACHE_TOKENS_AVAILABLE] == max_length * len(blocks1)
-    assert info_inside[CACHE_TOKENS_AVAILABLE] - info_inside2[CACHE_TOKENS_AVAILABLE] == max_length2 * len(blocks2)
+    for phony_id in added_nodes:
+        assert phony_id in routing_table
+        routing_table.__delitem__(phony_id)
+        assert phony_id not in routing_table
